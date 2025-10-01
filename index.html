@@ -1,0 +1,721 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Карта - Навігація</title>
+
+    <link rel="manifest" href="manifest.json">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.css" />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Карта-Навігація">
+
+    <style>
+        /* --- THEME VARIABLES --- */
+        :root {
+            --bg-color: rgba(255, 255, 255, 0.85);
+            --blur-effect: backdrop-filter: blur(12px);
+            --border-color: rgba(0, 0, 0, 0.1);
+            --shadow-color: rgba(0, 0, 0, 0.1);
+            --text-color: #2c2c2c;
+            --accent-color: #007aff;
+            --record-color: #ff3b30;
+            --navigation-color: #3478F6;
+            --transition-speed: 0.3s;
+            --main-bg: #eef1f4;
+            --icon-shadow: 0 1px 4px rgba(0,0,0,0.5);
+        }
+
+        body.dark-theme {
+            --bg-color: rgba(28, 28, 30, 0.85);
+            --border-color: rgba(255, 255, 255, 0.15);
+            --shadow-color: rgba(0, 0, 0, 0.3);
+            --text-color: #f5f5f7;
+            --main-bg: #1c1c1e;
+            --icon-shadow: 0 1px 4px rgba(0,0,0,0.7);
+        }
+        
+        /* --- GLOBAL STYLES --- */
+        html, body {
+            height: 100%;
+            width: 100%;
+            margin: 0;
+            padding: 0;
+            font-family: 'Inter', sans-serif;
+            color: var(--text-color);
+            background-color: var(--main-bg);
+            overflow: hidden;
+            position: fixed;
+        }
+        
+        #map {
+            width: 100%;
+            height: 100%;
+        }
+        
+        .map-routing-mode, .map-navigation-mode { cursor: crosshair !important; }
+
+        /* --- UI CONTROLS (BUTTONS) --- */
+        .action-button {
+            position: absolute;
+            width: 40px;
+            height: 40px;
+            background: none;
+            border: none;
+            border-radius: 8px;
+            font-size: 20px;
+            cursor: grab;
+            color: var(--text-color);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            transition: color 0.2s, transform 0.2s;
+            text-shadow: var(--icon-shadow);
+            z-index: 1001;
+        }
+        
+        .action-button.grabbing {
+            cursor: grabbing;
+            z-index: 1002; /* Make sure it's on top while dragging */
+        }
+
+        .action-button:hover {
+            color: var(--accent-color);
+            transform: scale(1.1);
+        }
+
+        .action-button.active {
+            color: var(--accent-color);
+        }
+        
+        .action-button.navigating {
+            color: var(--navigation-color);
+            animation: pulse 1.5s infinite;
+        }
+
+        .action-button.recording {
+            color: var(--record-color);
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+            100% { transform: scale(1); }
+        }
+        
+        /* --- MODALS --- */
+        .modal-overlay {
+            position: fixed; top: 0; left: 0;
+            width: 100%; height: 100%;
+            background: rgba(0,0,0,0.6);
+            z-index: 2500;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            opacity: 0; visibility: hidden;
+            transition: opacity 0.3s, visibility 0.3s;
+        }
+        .modal-overlay.visible {
+            opacity: 1; visibility: visible;
+        }
+
+        .modal-content {
+            background: var(--bg-color);
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: 0 5px 25px var(--shadow-color);
+            width: 90%;
+            max-width: 400px;
+            position: relative;
+            -webkit-backdrop-filter: var(--blur-effect);
+            backdrop-filter: var(--blur-effect);
+        }
+        
+        .modal-content h3 {
+            margin-top: 0;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 10px;
+            margin-bottom: 15px;
+            color: var(--text-color);
+        }
+
+        .modal-close {
+            position: absolute;
+            top: 10px; right: 15px;
+            font-size: 28px;
+            font-weight: bold;
+            background: none; border: none;
+            cursor: pointer;
+            color: var(--text-color);
+            opacity: 0.7;
+            transition: opacity 0.2s;
+        }
+        .modal-close:hover { opacity: 1; }
+        
+        /* --- SAVE ROUTE MODAL STYLES --- */
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; margin-bottom: 5px; font-weight: 500; font-size: 14px; color: var(--text-color); }
+        .form-group input[type="text"], .form-group input[type="color"] {
+            width: calc(100% - 22px); padding: 10px; border: 1px solid var(--border-color);
+            background: transparent; color: var(--text-color); border-radius: 6px; font-size: 14px;
+        }
+        .modal-submit-button {
+            width: 100%; padding: 12px; font-size: 16px; font-weight: 600; border: none;
+            background: var(--accent-color); color: white; border-radius: 8px; cursor: pointer;
+            margin-top: 15px; transition: background-color 0.2s;
+        }
+        
+        /* --- OTHER STYLES & LEAFLET OVERRIDES --- */
+        #coords-display {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            z-index: 1000;
+            background: transparent;
+            padding: 4px 8px;
+            font-size: 12px;
+            color: var(--text-color);
+            text-shadow: 0 0 3px var(--main-bg), 0 0 3px var(--main-bg), 0 0 3px var(--main-bg);
+        }
+        
+        .leaflet-control-zoom { background: transparent !important; border: none !important; box-shadow: none !important; }
+        .leaflet-control-zoom-in, .leaflet-control-zoom-out { background: transparent !important; color: var(--text-color) !important; border: none !important; box-shadow: none !important; width: 36px !important; height: 36px !important; line-height: 36px !important; font-size: 22px !important; text-shadow: var(--icon-shadow) !important; }
+        .leaflet-control-zoom a:hover { background-color: transparent !important; }
+        .leaflet-control-layers { border: 1px solid var(--border-color) !important; background: var(--bg-color) !important; -webkit-backdrop-filter: var(--blur-effect); backdrop-filter: var(--blur-effect); box-shadow: 0 2px 10px var(--shadow-color) !important; color: var(--text-color) !important; }
+
+        /* Routing Machine Styles Override */
+        .leaflet-routing-container {
+            background-color: var(--bg-color) !important;
+            color: var(--text-color) !important;
+            border: 1px solid var(--border-color) !important;
+            box-shadow: 0 4px 20px var(--shadow-color) !important;
+             -webkit-backdrop-filter: var(--blur-effect);
+            backdrop-filter: var(--blur-effect);
+        }
+        .leaflet-routing-alt, .leaflet-routing-geocoder { background-color: rgba(128,128,128,0.1) !important; }
+        .leaflet-routing-geocoder input { color: var(--text-color) !important; }
+        .leaflet-routing-container .leaflet-routing-alternatives-container { display: block; } /* Show instructions */
+
+        /* --- RESPONSIVENESS --- */
+        @media (max-width: 768px) {
+            .action-button { width: 40px; height: 40px; }
+            #coords-display { font-size: 10px; bottom: 30px; } /* Adjust for mobile zoom controls */
+        }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+
+    <div id="action-buttons">
+        <button id="theme-toggle-button" class="action-button" title="Змінити тему"><i class="fa-solid fa-moon"></i></button>
+        <button id="gps-button" class="action-button" title="Знайти моє місцеположення"><i class="fa-solid fa-location-crosshairs"></i></button>
+        <button id="route-recorder-button" class="action-button" title="Запис маршруту"><i class="fa-solid fa-route"></i></button>
+        <button id="routing-button" class="action-button" title="Прокласти маршрут (2 кліки)"><i class="fa-solid fa-diamond-turn-right"></i></button>
+        <button id="navigate-button" class="action-button" title="Навігація"><i class="fa-solid fa-location-arrow"></i></button>
+        <button id="install-button" class="action-button" title="Встановити додаток" style="display: none;"><i class="fa-solid fa-download"></i></button>
+    </div>
+
+    <div id="coords-display">Lat: 0.00000, Lng: 0.00000</div>
+    
+    <div id="save-route-modal-overlay" class="modal-overlay">
+        <div id="save-route-modal-content" class="modal-content">
+            <button id="save-route-modal-close-button" class="modal-close">&times;</button>
+            <h3>Зберегти маршрут</h3>
+            <div class="form-group">
+                <label for="route-name-input">Назва маршруту:</label>
+                <input type="text" id="route-name-input" placeholder="Наприклад, 'Патруль 1'">
+            </div>
+            <div class="form-group">
+                <label for="route-color-picker">Колір маршруту:</label>
+                <input type="color" id="route-color-picker" value="#007aff" style="width: 100%; height: 40px; padding: 0; border-radius: 5px;">
+            </div>
+            <p><strong>Дистанція:</strong> <span id="route-distance-display">0.00</span> km</p>
+            <div style="display: flex; gap: 10px; margin-top: 20px;">
+                <button id="discard-route-button" class="modal-submit-button" style="background-color: #8e8e93;">Скасувати</button>
+                <button id="save-route-submit" class="modal-submit-button">Зберегти</button>
+            </div>
+        </div>
+    </div>
+    
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.js"></script>
+    <script src='https://unpkg.com/@turf/turf@6/turf.min.js'></script>
+
+
+    <script>
+        // --- Global variables ---
+        let savedRoutes = [];
+        let deferredPrompt;
+        
+        // State variables
+        let isRecordingRoute = false;
+        let isNavigating = false;
+
+        // Route recording variables
+        let currentRoute = null;
+        let routePoints = [];
+        let routeWatchId = null;
+
+        // Navigation variables
+        let navigationControl = null;
+        let navigationWatchId = null;
+        let userPositionMarker = null;
+
+        // Routing variables
+        let planningControl = null;
+        let mortarRangeLayer = L.layerGroup();
+        
+        // --- Map and layers initialization ---
+        const map = L.map('map', { zoomControl: false }).setView([50.41, 30.64], 11);
+        L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+        const baseLayers = {
+            "Стандартна": L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OSM' }),
+            "Супутник": L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution: '&copy; Esri' }),
+        };
+        baseLayers["Стандартна"].addTo(map);
+
+        let savedRoutesLayer = L.layerGroup().addTo(map);
+        let tempRecordedRouteLayer = L.layerGroup().addTo(map);
+        mortarRangeLayer.addTo(map);
+
+        const overlayMaps = {
+            "Збережені маршрути": savedRoutesLayer,
+            "Зона ураження": mortarRangeLayer
+        };
+        L.control.layers(baseLayers, overlayMaps).addTo(map);
+
+        // --- DOM Element References ---
+        const coordsDisplay = document.getElementById('coords-display');
+        const installButton = document.getElementById('install-button');
+
+        // --- PWA INSTALL LOGIC ---
+        window.addEventListener('beforeinstallprompt', (e) => {
+            e.preventDefault();
+            deferredPrompt = e;
+            installButton.style.display = 'flex';
+        });
+        
+        installButton.addEventListener('click', async () => {
+            if (deferredPrompt) {
+                deferredPrompt.prompt();
+                const { outcome } = await deferredPrompt.userChoice;
+                if (outcome === 'accepted') {
+                    installButton.style.display = 'none';
+                }
+                deferredPrompt = null;
+            }
+        });
+
+        window.addEventListener('appinstalled', () => {
+             deferredPrompt = null;
+             console.log('PWA was installed');
+        });
+        
+        // --- THEME & UI LOGIC ---
+        const toggleTheme = (forceTheme = null) => {
+            const body = document.body;
+            let isDark = forceTheme ? forceTheme === 'dark' : !body.classList.contains('dark-theme');
+
+            body.classList.toggle('dark-theme', isDark);
+            
+            const themeIconOnMap = document.querySelector('#theme-toggle-button i');
+            if (themeIconOnMap) themeIconOnMap.className = isDark ? 'fa-solid fa-sun' : 'fa-solid fa-moon';
+            
+            localStorage.setItem('theme', isDark ? 'dark' : 'light');
+
+            if (isDark) {
+                if (map.hasLayer(baseLayers["Стандартна"])) map.removeLayer(baseLayers["Стандартна"]);
+                if (!map.hasLayer(baseLayers["Супутник"])) map.addLayer(baseLayers["Супутник"]);
+            } else {
+                if (map.hasLayer(baseLayers["Супутник"])) map.removeLayer(baseLayers["Супутник"]);
+                if (!map.hasLayer(baseLayers["Стандартна"])) map.addLayer(baseLayers["Стандартна"]);
+            }
+        };
+        
+        map.on('mousemove', (e) => {
+            coordsDisplay.innerHTML = `Lat: ${e.latlng.lat.toFixed(5)}, Lng: ${e.latlng.lng.toFixed(5)}`;
+        });
+        
+        // --- DRAGGABLE BUTTONS LOGIC ---
+        function makeDraggable(element) {
+            let isDragging = false, wasDragged = false, offsetX, offsetY, startX, startY;
+            const clickThreshold = 5;
+
+            function onDown(e) {
+                if (e.button === 2) return;
+                isDragging = true;
+                wasDragged = false;
+                element.classList.add('grabbing');
+                const touch = e.type === 'touchstart', event = touch ? e.touches[0] : e;
+                startX = event.clientX;
+                startY = event.clientY;
+                const rect = element.getBoundingClientRect();
+                offsetX = event.clientX - rect.left;
+                offsetY = event.clientY - rect.top;
+                window.addEventListener('mousemove', onMove);
+                window.addEventListener('touchmove', onMove, { passive: false });
+                window.addEventListener('mouseup', onUp);
+                window.addEventListener('touchend', onUp);
+            }
+
+            function onMove(e) {
+                if (!isDragging) return;
+                if (e.cancelable) e.preventDefault();
+                const touch = e.type === 'touchmove', event = touch ? e.touches[0] : e;
+                if (!wasDragged && (Math.abs(event.clientX - startX) > clickThreshold || Math.abs(event.clientY - startY) > clickThreshold)) {
+                    wasDragged = true;
+                }
+                let newLeft = event.clientX - offsetX, newTop = event.clientY - offsetY;
+                const rect = element.getBoundingClientRect(), parentRect = document.body.getBoundingClientRect();
+                newLeft = Math.max(0, Math.min(newLeft, parentRect.width - rect.width));
+                newTop = Math.max(0, Math.min(newTop, parentRect.height - rect.height));
+                element.style.left = `${newLeft}px`;
+                element.style.top = `${newTop}px`;
+                element.style.right = 'auto';
+            }
+
+            function onUp() {
+                isDragging = false;
+                element.classList.remove('grabbing');
+                window.removeEventListener('mousemove', onMove);
+                window.removeEventListener('touchmove', onMove);
+                window.removeEventListener('mouseup', onUp);
+                window.removeEventListener('touchend', onUp);
+                setTimeout(() => { wasDragged = false; }, 0);
+            }
+            
+            element.addEventListener('click', (e) => {
+                if (wasDragged) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                }
+            }, true);
+
+            element.addEventListener('mousedown', onDown);
+            element.addEventListener('touchstart', onDown, { passive: false });
+        }
+        
+        function getGpsLocation() {
+            navigator.geolocation.getCurrentPosition(pos => map.flyTo([pos.coords.latitude, pos.coords.longitude], 13), () => console.error("GPS Error"));
+        }
+
+        // --- ROUTE RECORDING LOGIC ---
+        function toggleRouteRecording() {
+            const button = document.getElementById('route-recorder-button');
+            const icon = button.querySelector('i');
+
+            if (!isRecordingRoute) {
+                if (!navigator.geolocation) {
+                    alert("GPS-трекінг не підтримується вашим браузером.");
+                    return;
+                }
+                isRecordingRoute = true;
+                routePoints = [];
+                button.classList.add('recording');
+                button.title = "Зупинити запис";
+                icon.className = 'fa-solid fa-stop';
+
+                routeWatchId = navigator.geolocation.watchPosition(
+                    (position) => {
+                        const latlng = L.latLng(position.coords.latitude, position.coords.longitude);
+                        routePoints.push(latlng);
+                        if (!currentRoute) {
+                            currentRoute = L.polyline(routePoints, { color: 'var(--record-color)', weight: 4, opacity: 0.8 }).addTo(tempRecordedRouteLayer);
+                        } else {
+                            currentRoute.setLatLngs(routePoints);
+                        }
+                    },
+                    (error) => {
+                        console.error("Помилка GPS:", error);
+                        toggleRouteRecording(); // Stop on error
+                    },
+                    { enableHighAccuracy: true }
+                );
+            } else {
+                isRecordingRoute = false;
+                navigator.geolocation.clearWatch(routeWatchId);
+                button.classList.remove('recording');
+                button.title = "Запис маршруту";
+                icon.className = 'fa-solid fa-route';
+                
+                if (routePoints.length > 1) {
+                    const coords = routePoints.map(p => [p.lng, p.lat]);
+                    const distance = turf.length(turf.lineString(coords), { units: 'kilometers' });
+                    openSaveRouteModal(routePoints, distance);
+                } else {
+                    tempRecordedRouteLayer.clearLayers();
+                }
+                currentRoute = null;
+                routeWatchId = null;
+            }
+        }
+        
+        // --- SAVED ROUTES LOGIC ---
+        function loadSavedRoutes() {
+            const storedRoutes = localStorage.getItem('savedRoutes');
+            if (storedRoutes) {
+                savedRoutes = JSON.parse(storedRoutes);
+                savedRoutesLayer.clearLayers();
+                savedRoutes.forEach(route => {
+                    const routeLine = L.polyline(route.latlngs, { color: route.color, weight: 4, opacity: 0.8 }).addTo(savedRoutesLayer);
+                    routeLine.bindPopup(`<b>${route.name}</b><br>Дистанція: ${route.distance.toFixed(2)} км`);
+                });
+            }
+        }
+
+        function saveRoutesToStorage() {
+            localStorage.setItem('savedRoutes', JSON.stringify(savedRoutes));
+        }
+
+        const saveRouteModal = document.getElementById('save-route-modal-overlay');
+        let tempRouteData = {};
+
+        function openSaveRouteModal(latlngs, distance) {
+            tempRouteData = { latlngs, distance };
+            document.getElementById('route-distance-display').textContent = `${distance.toFixed(2)} km`;
+            document.getElementById('route-name-input').value = `Маршрут ${new Date().toLocaleString('uk-UA')}`;
+            document.getElementById('route-color-picker').value = '#007aff';
+            saveRouteModal.classList.add('visible');
+        }
+
+        function closeSaveRouteModal() {
+            saveRouteModal.classList.remove('visible');
+            tempRecordedRouteLayer.clearLayers();
+            tempRouteData = {};
+            routePoints = [];
+        }
+
+        document.getElementById('save-route-submit').addEventListener('click', () => {
+            const name = document.getElementById('route-name-input').value.trim();
+            const color = document.getElementById('route-color-picker').value;
+            if (!name) { alert('Будь ласка, введіть назву маршруту.'); return; }
+
+            const newRoute = {
+                id: `route_${Date.now()}`,
+                name: name,
+                color: color,
+                distance: tempRouteData.distance,
+                latlngs: tempRouteData.latlngs
+            };
+
+            savedRoutes.push(newRoute);
+            saveRoutesToStorage();
+            loadSavedRoutes();
+            closeSaveRouteModal();
+        });
+
+        document.getElementById('discard-route-button').addEventListener('click', closeSaveRouteModal);
+        document.getElementById('save-route-modal-close-button').addEventListener('click', closeSaveRouteModal);
+        saveRouteModal.addEventListener('click', (e) => { if (e.target === saveRouteModal) closeSaveRouteModal(); });
+
+        // --- ROUTE PLANNING LOGIC ---
+        function startRoutePlanning() {
+            map.getContainer().classList.add('map-routing-mode');
+            const routingButton = document.getElementById('routing-button');
+            routingButton.classList.add('active');
+            let waypoints = [];
+            
+            if (planningControl) { map.removeControl(planningControl); planningControl = null; }
+            mortarRangeLayer.clearLayers();
+
+            const onMapClick = (e) => {
+                waypoints.push(e.latlng);
+                L.marker(e.latlng).addTo(mortarRangeLayer); 
+
+                if (waypoints.length === 2) {
+                    map.off('click', onMapClick);
+                    map.getContainer().classList.remove('map-routing-mode');
+                    routingButton.classList.remove('active');
+                    
+                    planningControl = L.Routing.control({
+                        waypoints: waypoints,
+                        createMarker: function() { return null; },
+                        show: true,
+                        lineOptions: { styles: [{color: 'var(--accent-color)', opacity: 0.8, weight: 6}] },
+                        router: L.Routing.osrmv1({ serviceUrl: `https://router.project-osrm.org/route/v1` }),
+                    }).addTo(map);
+                    
+                    planningControl.on('routesfound', function(e) {
+                        const routes = e.routes;
+                        if (routes.length > 0) {
+                            const route = routes[0];
+                            const routeCoordsForTurf = route.coordinates.map(c => [c.lng, c.lat]);
+                            calculateAndDrawMortarRange(routeCoordsForTurf, 400, 3500);
+
+                            const container = planningControl.getContainer();
+                            if (container) {
+                                const oldButton = container.querySelector('.save-route-btn');
+                                if (oldButton) oldButton.remove();
+
+                                const summaryEl = container.querySelector('.leaflet-routing-alt');
+                                if (summaryEl) {
+                                    const saveButton = L.DomUtil.create('button', 'modal-submit-button', summaryEl);
+                                    saveButton.textContent = 'Зберегти цей маршрут';
+                                    Object.assign(saveButton.style, { width: 'auto', padding: '8px 12px', fontSize: '14px', marginTop: '10px' });
+                                    
+                                    saveButton.onclick = function() {
+                                        openSaveRouteModal(route.coordinates, route.summary.totalDistance / 1000);
+                                    };
+                                }
+                            }
+                        }
+                    });
+                }
+            };
+            map.on('click', onMapClick);
+        }
+
+        function calculateAndDrawMortarRange(coords, minRange, maxRange) {
+            mortarRangeLayer.clearLayers();
+            try {
+                const routeLine = turf.lineString(coords);
+                const maxBuffer = turf.buffer(routeLine, maxRange, { units: 'meters' });
+                
+                let effectiveZone = maxBuffer;
+                if (minRange > 0) {
+                    const minBuffer = turf.buffer(routeLine, minRange, { units: 'meters' });
+                    effectiveZone = turf.difference(maxBuffer, minBuffer);
+                }
+                
+                L.geoJSON(effectiveZone, {
+                    style: { color: "#ff4747", weight: 2, opacity: 0.7, fillColor: "#ff4747", fillOpacity: 0.3 }
+                }).addTo(mortarRangeLayer);
+            } catch (error) { console.error("Помилка розрахунку зони ураження:", error); }
+        }
+
+        // --- REAL-TIME NAVIGATION LOGIC ---
+        function toggleNavigationMode() {
+            if (isNavigating) {
+                stopNavigationMode();
+            } else {
+                startNavigationMode();
+            }
+        }
+
+        function startNavigationMode() {
+            if (!navigator.geolocation) {
+                alert("Навігація не підтримується вашим браузером.");
+                return;
+            }
+            isNavigating = true;
+            const navButton = document.getElementById('navigate-button');
+            navButton.classList.add('navigating');
+            navButton.title = "Зупинити навігацію";
+
+            map.getContainer().classList.add('map-navigation-mode');
+            alert("Клікніть на карті, щоб обрати пункт призначення.");
+
+            map.once('click', (e) => {
+                const destination = e.latlng;
+                
+                navigator.geolocation.getCurrentPosition((position) => {
+                    const start = L.latLng(position.coords.latitude, position.coords.longitude);
+
+                    navigationControl = L.Routing.control({
+                        waypoints: [start, destination],
+                        routeWhileDragging: true,
+                        createMarker: function(i, wp) {
+                            // Hide default markers, we will use our own
+                            return L.marker(wp.latLng, {
+                                icon: L.divIcon({className: 'leaflet-routing-icon', iconSize: [0, 0]})
+                            });
+                        }
+                    }).addTo(map);
+
+                    // Marker for current user position
+                    userPositionMarker = L.circle(start, {
+                        color: 'var(--navigation-color)',
+                        fillColor: '#fff',
+                        fillOpacity: 1,
+                        radius: 8,
+                        weight: 2
+                    }).addTo(map);
+                    
+                    map.flyTo(start, 16);
+
+                    // Watch position to update marker
+                    navigationWatchId = navigator.geolocation.watchPosition((pos) => {
+                        const newLatLng = L.latLng(pos.coords.latitude, pos.coords.longitude);
+                        userPositionMarker.setLatLng(newLatLng);
+                        
+                        // Update the start of the route
+                        navigationControl.spliceWaypoints(0, 1, newLatLng);
+                        
+                        // Center map on user
+                        map.panTo(newLatLng);
+                    }, 
+                    (error) => { console.error("GPS error during navigation:", error); }, 
+                    { enableHighAccuracy: true });
+
+                }, (error) => {
+                    alert("Не вдалося отримати вашу геолокацію.");
+                    stopNavigationMode();
+                });
+
+                map.getContainer().classList.remove('map-navigation-mode');
+            });
+        }
+
+        function stopNavigationMode() {
+            isNavigating = false;
+            const navButton = document.getElementById('navigate-button');
+            navButton.classList.remove('navigating');
+            navButton.title = "Навігація";
+            
+            map.getContainer().classList.remove('map-navigation-mode');
+            map.off('click'); // Remove the listener if it was set
+
+            if (navigationWatchId) {
+                navigator.geolocation.clearWatch(navigationWatchId);
+                navigationWatchId = null;
+            }
+            if (navigationControl) {
+                map.removeControl(navigationControl);
+                navigationControl = null;
+            }
+            if (userPositionMarker) {
+                map.removeLayer(userPositionMarker);
+                userPositionMarker = null;
+            }
+        }
+
+
+        // --- APPLICATION STARTUP ---
+        window.addEventListener('load', () => {
+            loadSavedRoutes();
+            
+            const savedTheme = localStorage.getItem('theme');
+            toggleTheme(savedTheme || 'light');
+            
+            // Setup buttons
+            const buttons = document.querySelectorAll('.action-button');
+            buttons.forEach((button, index) => {
+                button.style.top = `${10 + (index * 50)}px`;
+                button.style.right = '10px';
+                makeDraggable(button);
+            });
+            
+            document.getElementById('theme-toggle-button').addEventListener('click', () => toggleTheme());
+            document.getElementById('gps-button').addEventListener('click', getGpsLocation);
+            document.getElementById('route-recorder-button').addEventListener('click', toggleRouteRecording);
+            document.getElementById('routing-button').addEventListener('click', startRoutePlanning);
+            document.getElementById('navigate-button').addEventListener('click', toggleNavigationMode);
+            
+            // PWA: Service Worker
+            if ('serviceWorker' in navigator) {
+                navigator.serviceWorker.register('/sw.js').then(r => console.log('SW registered')).catch(e => console.log('SW reg failed', e));
+            }
+        });
+    </script>
+</body>
+</html>
