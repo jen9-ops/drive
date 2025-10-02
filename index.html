@@ -162,15 +162,14 @@
         .list-item:hover { background: rgba(128,128,128,0.2); }
         .list-item-actions button { background: none; border: none; color: var(--danger-color); cursor: pointer; font-size: 16px; }
 
-        /* === ИЗМЕНЕНИЕ: Позиция блока изменена на верх-центр === */
         #sunrise-eta-display {
             position: absolute;
-            top: 15px; /* Отступ сверху */
-            left: 50%; /* Центрирование по горизонтали */
+            top: 15px;
+            left: 50%;
             z-index: 1000;
             background: var(--bg-color);
             color: var(--text-color);
-            padding: 8px 12px;
+            padding: 8px; /* Уменьшаем паддинг для компактности */
             border-radius: 8px;
             font-size: 14px;
             font-weight: 500;
@@ -179,14 +178,36 @@
             box-shadow: 0 2px 8px var(--shadow-color);
             transition: opacity 0.3s, transform 0.3s;
             opacity: 0;
-            /* Начальное состояние для анимации: по центру и чуть выше */
             transform: translate(-50%, -10px); 
-            pointer-events: none;
+            pointer-events: none; /* Контейнер не кликабельный */
+            display: flex;
+            align-items: center;
+            gap: 8px;
         }
         #sunrise-eta-display.visible {
             opacity: 1;
-            /* Конечное состояние для анимации: по центру на своей позиции */
             transform: translate(-50%, 0);
+        }
+        #sunrise-eta-display .separator {
+            width: 1px;
+            height: 16px;
+            background-color: var(--border-color);
+        }
+        /* Стили для кнопки-переключателя */
+        #eta-toggle-btn {
+            pointer-events: all; /* Кнопка кликабельна */
+            background: none;
+            border: none;
+            color: var(--text-color);
+            font-size: 18px;
+            cursor: pointer;
+            padding: 4px;
+            line-height: 1;
+            border-radius: 4px;
+            transition: background-color 0.2s;
+        }
+        #eta-toggle-btn:hover {
+            background-color: var(--border-color);
         }
     </style>
 </head>
@@ -227,22 +248,25 @@
             this.map = null;
             this.elements = {};
             this.layers = {};
+            // === ИЗМЕНЕНИЕ: Добавлены новые состояния для прогноза ===
             this.state = {
                 isRecording: false,
                 isNavigating: false,
                 isPlanning: false,
                 deferredPrompt: null,
                 sunriseTime: null,
+                sunsetTime: null,    // Для хранения времени заката
+                etaTarget: 'sunrise' // 'sunrise' или 'sunset'
             };
             this.services = {
                 coordinator: new Coordinator(),
                 recording: { watchId: null, points: [], tempLayer: null },
-                navigation: { watchId: null, control: null, marker: null, oneWayDistance: 0 },
+                navigation: { watchId: null, control: null, marker: null, oneWayDistance: 0, lastKnownSpeed: 0 },
                 planning: { control: null, waypoints: [] },
                 routes: JSON.parse(localStorage.getItem('savedRoutes') || '[]')
             };
         }
-
+        
         // --- Весь код до функции toggleNavigation остается без изменений ---
         init() { console.log("🚀 Ініціалізація Тактичної Карти-Навігатора..."); this.initMap(); this.initUI(); this.setupEventHandlers(); this._setupPWA(); this.loadTheme(); this.loadSavedRoutes(); this.showNotification('Додаток готовий до роботи!', 'success'); }
         initMap() { this.map = L.map('map', { zoomControl: false }).setView([50.41, 30.64], 11); L.control.zoom({ position: 'bottomright' }).addTo(this.map); this.layers.base = { "Стандартна": L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors' }), "Супутник": L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution: 'Tiles &copy; Esri' }), }; this.layers.base["Стандартна"].addTo(this.map); this.layers.savedRoutes = L.layerGroup().addTo(this.map); this.layers.mortarRange = L.layerGroup().addTo(this.map); this.services.recording.tempLayer = L.layerGroup().addTo(this.map); L.control.layers(this.layers.base, { "Збережені маршрути": this.layers.savedRoutes, "Зона ураження": this.layers.mortarRange }).addTo(this.map); this.map.on('mousemove', e => this.updateCoordinates(e.latlng)); this.map.on('click', e => this.updateCoordinates(e.latlng)); }
@@ -273,6 +297,7 @@
         _handlePlanningClick(e) { this.services.planning.waypoints.push(e.latlng); L.marker(e.latlng, { icon: L.divIcon({ className: 'planning-marker', html: `<div style="background: var(--accent-color); color: white; border-radius: 50%; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; font-size: 12px;">${this.services.planning.waypoints.length}</div>`, iconSize: [20, 20] }) }).addTo(this.layers.mortarRange); if (this.services.planning.waypoints.length === 1) { this.showNotification("Тепер клікніть, щоб встановити кінцеву точку"); } if (this.services.planning.waypoints.length === 2) { this.services.planning.control = L.Routing.control({ waypoints: this.services.planning.waypoints, createMarker: () => null, show: false, lineOptions: { styles: [{color: 'var(--accent-color)', opacity: 0.8, weight: 6}], extendToWaypoints: true, missingRouteTolerance: 10 }, routeWhileDragging: true, showAlternatives: false }).addTo(this.map); this.services.planning.control.on('routesfound', e => { const route = e.routes[0]; const coords = route.coordinates.map(c => [c.lng, c.lat]); this._calculateAndDrawMortarRange(coords, 400, 3500); this.showNotification(`Маршрут побудовано. Дистанція: ${(route.summary.totalDistance / 1000).toFixed(2)} км`); }); this.services.planning.control.on('routingerror', e => { this.showNotification("Помилка побудови маршруту", "error"); }); this.togglePlanning(); } }
         _calculateAndDrawMortarRange(coords, min, max) { try { const routeLine = turf.lineString(coords); const maxBuffer = turf.buffer(routeLine, max, { units: 'meters' }); const minBuffer = turf.buffer(routeLine, min, { units: 'meters' }); const effectiveZone = turf.difference(maxBuffer, minBuffer); L.geoJSON(effectiveZone, { style: { color: "#ff4747", weight: 2, opacity: 0.7, fillColor: "#ff4747", fillOpacity: 0.3 } }).addTo(this.layers.mortarRange).bindPopup(`Зона ураження<br>Дальність: ${min}-${max} м`); } catch (e) { console.error("Помилка розрахунку зони ураження:", e); this.showNotification("Помилка розрахунку зони ураження", "error"); } }
 
+        // === ИЗМЕНЕНИЕ: Функция навигации с расчетом "туда и обратно" и переключателем Рассвет/Закат ===
         toggleNavigation() {
             this.state.isNavigating = !this.state.isNavigating;
             const button = document.getElementById('navigate-btn');
@@ -289,10 +314,12 @@
                     navigator.geolocation.getCurrentPosition(async (pos) => {
                         const start = L.latLng(pos.coords.latitude, pos.coords.longitude);
                         
-                        this.elements.sunriseEtaDisplay.innerHTML = `🌅 Завантаження часу сходу...`;
+                        // Загружаем время рассвета и заката для точки СТАРТА
+                        this.elements.sunriseEtaDisplay.innerHTML = `<span>Завантаження...</span>`;
                         this.elements.sunriseEtaDisplay.classList.add('visible');
                         const sunTimes = await this._fetchSunriseSunset(start.lat, start.lng);
                         this.state.sunriseTime = sunTimes ? sunTimes.sunrise : null;
+                        this.state.sunsetTime = sunTimes ? sunTimes.sunset : null;
 
                         this.services.navigation.control = L.Routing.control({
                             waypoints: [start, destination],
@@ -317,6 +344,7 @@
                                 const newLatLng = L.latLng(pos.coords.latitude, pos.coords.longitude);
                                 this.services.navigation.marker.setLatLng(newLatLng);
                                 this.services.navigation.control.spliceWaypoints(0, 1, newLatLng);
+                                this.services.navigation.lastKnownSpeed = pos.coords.speed;
                                 this._updateRoundTripEta(pos.coords.speed); 
                             },
                             () => this.showNotification("Помилка оновлення позиції", "error"),
@@ -336,44 +364,67 @@
                 if (this.services.navigation.marker) this.map.removeLayer(this.services.navigation.marker);
                 
                 this.elements.sunriseEtaDisplay.classList.remove('visible');
-                this.services.navigation = { watchId: null, control: null, marker: null, oneWayDistance: 0 };
+                this.services.navigation = { watchId: null, control: null, marker: null, oneWayDistance: 0, lastKnownSpeed: 0 };
                 this.state.sunriseTime = null;
+                this.state.sunsetTime = null;
+                this.state.etaTarget = 'sunrise'; // Сброс на рассвет
                 this.showNotification("Навігацію вимкнено");
             }
         }
 
         _updateRoundTripEta(speedInMps) {
-            if (!this.state.sunriseTime) {
-                this.elements.sunriseEtaDisplay.innerHTML = '🌅 Час сходу невідомий';
-                return;
-            }
-
             const speed = speedInMps || 0;
-            const oneWayDistance = this.services.navigation.oneWayDistance || 0;
-            const roundTripDistance = oneWayDistance * 2;
-
-            if (speed < 0.5) {
-                this.elements.sunriseEtaDisplay.innerHTML = ` туда й назад: ${(roundTripDistance / 1000).toFixed(2)} км`;
-                return;
-            }
-
-            const timeToArrivalSeconds = roundTripDistance / speed;
-            const arrivalDate = new Date(Date.now() + timeToArrivalSeconds * 1000);
-            const timeDiff = this.state.sunriseTime.getTime() - arrivalDate.getTime();
-
-            const formatDiff = (ms) => {
-                const totalSeconds = Math.abs(Math.floor(ms / 1000));
-                const hours = Math.floor(totalSeconds / 3600).toString().padStart(2, '0');
-                const minutes = Math.floor((totalSeconds % 3600) / 60).toString().padStart(2, '0');
-                const seconds = (totalSeconds % 60).toString().padStart(2, '0');
-                return `${hours}:${minutes}:${seconds}`;
-            };
+            const speedKmh = (speed * 3.6).toFixed(1);
             
-            if (timeDiff > 0) {
-                this.elements.sunriseEtaDisplay.innerHTML = `✅ Повернетесь до сходу (запас: ${formatDiff(timeDiff)})`;
+            const targetTime = this.state.etaTarget === 'sunrise' ? this.state.sunriseTime : this.state.sunsetTime;
+            const targetLabel = this.state.etaTarget === 'sunrise' ? 'сходу' : 'заходу';
+            
+            let etaHtml = '';
+
+            if (!targetTime) {
+                etaHtml = `🌅 Час ${targetLabel} невідомий`;
             } else {
-                this.elements.sunriseEtaDisplay.innerHTML = `❌ Запізнення з поверненням: ${formatDiff(timeDiff)}`;
+                const oneWayDistance = this.services.navigation.oneWayDistance || 0;
+                const roundTripDistance = oneWayDistance * 2;
+
+                if (speed < 0.5) {
+                    etaHtml = `туди й назад: ${(roundTripDistance / 1000).toFixed(2)} км`;
+                } else {
+                    const timeToArrivalSeconds = roundTripDistance / speed;
+                    const arrivalDate = new Date(Date.now() + timeToArrivalSeconds * 1000);
+                    const timeDiff = targetTime.getTime() - arrivalDate.getTime();
+                    
+                    const formatDiff = (ms) => {
+                        const totalSeconds = Math.abs(Math.floor(ms / 1000));
+                        const hours = Math.floor(totalSeconds / 3600).toString().padStart(2, '0');
+                        const minutes = Math.floor((totalSeconds % 3600) / 60).toString().padStart(2, '0');
+                        return `${hours}:${minutes}`; // Упрощаем до часов и минут
+                    };
+                    
+                    if (timeDiff > 0) {
+                        etaHtml = `✅ Повернетесь до ${targetLabel} (запас: ${formatDiff(timeDiff)})`;
+                    } else {
+                        etaHtml = `❌ Запізнення з поверненням: ${formatDiff(timeDiff)}`;
+                    }
+                }
             }
+            
+            const toggleIcon = this.state.etaTarget === 'sunrise' ? '🌇' : '🌅';
+            
+            this.elements.sunriseEtaDisplay.innerHTML = `
+                <span>🚀 ${speedKmh} км/год</span>
+                <div class="separator"></div>
+                <span>${etaHtml}</span>
+                <div class="separator"></div>
+                <button id="eta-toggle-btn" title="Переключити на захід/схід сонця">${toggleIcon}</button>
+            `;
+            
+            // Навешиваем событие на кнопку каждый раз при обновлении, т.к. innerHTML её пересоздаёт
+            document.getElementById('eta-toggle-btn').addEventListener('click', (e) => {
+                e.stopPropagation(); // Чтобы клик по кнопке не проваливался на карту
+                this.state.etaTarget = this.state.etaTarget === 'sunrise' ? 'sunset' : 'sunrise';
+                this._updateRoundTripEta(this.services.navigation.lastKnownSpeed); // Обновляем инфо-блок немедленно
+            });
         }
     }
 
