@@ -162,7 +162,6 @@
         .list-item:hover { background: rgba(128,128,128,0.2); }
         .list-item-actions button { background: none; border: none; color: var(--danger-color); cursor: pointer; font-size: 16px; }
 
-        /* === ИЗМЕНЕНИЕ: Стили для навигационной панели === */
         #nav-info-panel {
             position: absolute;
             top: 15px;
@@ -209,7 +208,7 @@
         #eta-toggle-btn:hover {
             background-color: var(--border-color);
         }
-        #arrival-weather {
+        #arrival-weather, .eta-info {
             display: flex;
             align-items: center;
             gap: 5px;
@@ -261,7 +260,7 @@
                 sunriseTime: null,
                 sunsetTime: null,
                 etaTarget: 'sunrise',
-                routeWeather: null, // === НОВОЕ СОСТОЯНИЕ: для прогноза погоды
+                routeWeather: null,
             };
             this.services = {
                 coordinator: new Coordinator(),
@@ -297,21 +296,7 @@
         importRoutes() { const input = document.createElement('input'); input.type = 'file'; input.accept = '.json'; input.onchange = e => { const file = e.target.files[0]; if (!file) return; const reader = new FileReader(); reader.onload = event => { try { const importedRoutes = JSON.parse(event.target.result); if (Array.isArray(importedRoutes)) { this.services.routes = [...this.services.routes, ...importedRoutes]; localStorage.setItem('savedRoutes', JSON.stringify(this.services.routes)); this.loadSavedRoutes(); this.showNotification(`Імпортовано ${importedRoutes.length} маршрутів`, "success"); } else { this.showNotification("Невірний формат файлу", "error"); } } catch (err) { this.showNotification("Помилка імпорту файлу", "error"); } }; reader.readAsText(file); }; input.click(); }
         async searchLocation() { const query = document.getElementById('search-input').value.trim(); const resultsContainer = document.getElementById('search-results'); if (!query) { this.showNotification("Введіть пошуковий запит", "warning"); return; } resultsContainer.innerHTML = 'Пошук...'; const coords = this.services.coordinator.parse(query); if (coords) { this.map.flyTo([coords.lat, coords.lng], 15); L.marker([coords.lat, coords.lng]).addTo(this.map).bindPopup(`Знайдено: ${query}`).openPopup(); this._hideModal('search'); this.showNotification(`Координати знайдено: ${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}`, "success"); return; } try { const response = await fetch( `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=10&addressdetails=1` ); const data = await response.json(); resultsContainer.innerHTML = ''; if (data.length === 0) { resultsContainer.innerHTML = 'Нічого не знайдено.'; return; } data.forEach(item => { const resultEl = document.createElement('div'); resultEl.className = 'list-item'; resultEl.innerHTML = `<div><strong>${item.display_name}</strong><div style="font-size: 12px; color: #666;">${item.lat}, ${item.lon}</div></div>`; resultEl.onclick = () => { const latlng = [parseFloat(item.lat), parseFloat(item.lon)]; this.map.flyTo(latlng, 15); L.marker(latlng).addTo(this.map).bindPopup(`<b>${item.display_name}</b>`).openPopup(); this._hideModal('search'); this.showNotification(`Місце знайдено: ${item.display_name}`, "success"); }; resultsContainer.appendChild(resultEl); }); } catch (e) { resultsContainer.innerHTML = 'Помилка пошуку.'; console.error('Search error:', e); } }
         async _fetchSunriseSunset(lat, lng) { try { const response = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&daily=sunrise,sunset&timezone=auto&forecast_days=1`); if (!response.ok) throw new Error('Network response was not ok'); const data = await response.json(); return { sunrise: new Date(data.daily.sunrise[0]), sunset: new Date(data.daily.sunset[0]), }; } catch (error) { console.error('Sunrise/Sunset fetch error:', error); this.showNotification("Не вдалося завантажити час сходу сонця", "error"); return null; } }
-        
-        // === НОВАЯ ФУНКЦИЯ: для получения прогноза погоды по маршруту ===
-        async _fetchRouteWeather(lat, lng) {
-            try {
-                const response = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&hourly=temperature_2m,precipitation_probability,weather_code&timezone=auto`);
-                if (!response.ok) throw new Error('Weather fetch failed');
-                const data = await response.json();
-                return data;
-            } catch (error) {
-                console.error("Route weather error:", error);
-                this.showNotification("Помилка завантаження прогнозу", "error");
-                return null;
-            }
-        }
-        
+        async _fetchRouteWeather(lat, lng) { try { const response = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&hourly=temperature_2m,precipitation_probability,weather_code&timezone=auto`); if (!response.ok) throw new Error('Weather fetch failed'); const data = await response.json(); return data; } catch (error) { console.error("Route weather error:", error); this.showNotification("Помилка завантаження прогнозу", "error"); return null; } }
         async showWeather() { this._showModal('weather'); const detailsContainer = document.getElementById('weather-details'); detailsContainer.innerHTML = 'Завантаження погоди...'; const center = this.map.getCenter(); const sunTimes = await this._fetchSunriseSunset(center.lat, center.lng); try { const response = await fetch( `https://api.open-meteo.com/v1/forecast?latitude=${center.lat}&longitude=${center.lng}&current=temperature_2m,weather_code,wind_speed_10m,relative_humidity_2m&timezone=auto&forecast_days=1` ); if (!response.ok) throw new Error('Network response was not ok'); const data = await response.json(); const weatherCodes = { 0: 'Ясно', 1: 'Переважно ясно', 2: 'Мінлива хмарність', 3: 'Хмарно', 45: 'Туман', 48: 'Туман з інеєм', 51: 'Мряка: легка', 53: 'Мряка: помірна', 55: 'Мряка: густа', 61: 'Дощ: легкий', 63: 'Дощ: помірний', 65: 'Дощ: сильний', 80: 'Злива: легка', 81: 'Злива: помірна', 82: 'Злива: сильна' }; const weatherDescription = weatherCodes[data.current.weather_code] || 'Невідомо'; const weatherHTML = ` <p><strong>Становище:</strong> ${weatherDescription}</p> <p><strong>Температура:</strong> ${data.current.temperature_2m}°C</p> <p><strong>Вологість:</strong> ${data.current.relative_humidity_2m}%</p> <p><strong>Вітер:</strong> ${data.current.wind_speed_10m} км/год</p> <p><strong>Схід сонця:</strong> ${sunTimes ? sunTimes.sunrise.toLocaleTimeString('uk-UA') : 'Н/Д'}</p> <p><strong>Захід сонця:</strong> ${sunTimes ? sunTimes.sunset.toLocaleTimeString('uk-UA') : 'Н/Д'}</p> <p><em>Координати: ${center.lat.toFixed(4)}, ${center.lng.toFixed(4)}</em></p> `; detailsContainer.innerHTML = weatherHTML; } catch (error) { detailsContainer.innerHTML = 'Не вдалося завантажити погоду.'; console.error('Weather error:', error); } }
         togglePlanning() { this.state.isPlanning = !this.state.isPlanning; const button = document.getElementById('plan-btn'); button.classList.toggle('active', this.state.isPlanning); this.map.getContainer().classList.toggle('map-routing-mode', this.state.isPlanning); if(this.state.isPlanning) { this.services.planning.waypoints = []; if(this.services.planning.control) { this.map.removeControl(this.services.planning.control); } this.layers.mortarRange.clearLayers(); this.map.on('click', this._handlePlanningClick, this); this.showNotification("Клікніть на карті, щоб встановити початкову точку"); } else { this.map.off('click', this._handlePlanningClick, this); this.showNotification("Режим планування вимкнено"); } }
         _handlePlanningClick(e) { this.services.planning.waypoints.push(e.latlng); L.marker(e.latlng, { icon: L.divIcon({ className: 'planning-marker', html: `<div style="background: var(--accent-color); color: white; border-radius: 50%; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; font-size: 12px;">${this.services.planning.waypoints.length}</div>`, iconSize: [20, 20] }) }).addTo(this.layers.mortarRange); if (this.services.planning.waypoints.length === 1) { this.showNotification("Тепер клікніть, щоб встановити кінцеву точку"); } if (this.services.planning.waypoints.length === 2) { this.services.planning.control = L.Routing.control({ waypoints: this.services.planning.waypoints, createMarker: () => null, show: false, lineOptions: { styles: [{color: 'var(--accent-color)', opacity: 0.8, weight: 6}], extendToWaypoints: true, missingRouteTolerance: 10 }, routeWhileDragging: true, showAlternatives: false }).addTo(this.map); this.services.planning.control.on('routesfound', e => { const route = e.routes[0]; const coords = route.coordinates.map(c => [c.lng, c.lat]); this._calculateAndDrawMortarRange(coords, 400, 3500); this.showNotification(`Маршрут побудовано. Дистанція: ${(route.summary.totalDistance / 1000).toFixed(2)} км`); }); this.services.planning.control.on('routingerror', e => { this.showNotification("Помилка побудови маршруту", "error"); }); this.togglePlanning(); } }
@@ -336,7 +321,6 @@
                         this.elements.navInfoPanel.innerHTML = `<span>Завантаження...</span>`;
                         this.elements.navInfoPanel.classList.add('visible');
 
-                        // === ИЗМЕНЕНИЕ: Загружаем оба прогноза: и солнце, и погоду ===
                         const sunTimes = await this._fetchSunriseSunset(start.lat, start.lng);
                         this.state.sunriseTime = sunTimes ? sunTimes.sunrise : null;
                         this.state.sunsetTime = sunTimes ? sunTimes.sunset : null;
@@ -379,12 +363,11 @@
             }
         }
         
-        // === ИЗМЕНЕНИЕ: Функция переименована и полностью переработана ===
+        // === ИЗМЕНЕНИЕ: Добавлен расчет рекомендуемой скорости ===
         _updateNavPanel(speedInMps) {
             const speed = speedInMps || 0;
             const speedKmh = (speed * 3.6).toFixed(1);
             
-            // --- Часть 1: Прогноз погоды по прибытии ---
             let weatherHtml = 'Погода: Н/Д';
             const oneWayDistance = this.services.navigation.oneWayDistance || 0;
             if (this.state.routeWeather && speed > 0.5) {
@@ -392,9 +375,7 @@
                 const arrivalDate = new Date(Date.now() + timeToOneWayArrivalSeconds * 1000);
                 const arrivalHour = arrivalDate.getHours();
                 const arrivalDateString = arrivalDate.toISOString().substring(0, 10);
-                
                 const weatherCodes = {0:"☀️",1:"🌤️",2:"🌥️",3:"☁️",45:"🌫️",48:"🌫️",51:"🌧️",53:"🌧️",55:"🌧️",61:"🌧️",63:"🌧️",65:"🌧️",80:"🌧️",81:"🌧️",82:"🌧️"};
-                
                 try {
                     const timeIndex = this.state.routeWeather.hourly.time.findIndex(t => t.startsWith(`${arrivalDateString}T${String(arrivalHour).padStart(2, '0')}`));
                     if (timeIndex !== -1) {
@@ -403,18 +384,20 @@
                         const precip = this.state.routeWeather.hourly.precipitation_probability[timeIndex];
                         weatherHtml = `<div id="arrival-weather" title="Прогноз на час прибуття"><span>${weatherCodes[code] || '❓'}</span> ${temp}°C | ${precip}% 💧</div>`;
                     }
-                } catch(e) { /* Ошибка парсинга погоды, ничего не делаем */ }
+                } catch(e) { /* Игнорируем ошибку */ }
             }
 
-            // --- Часть 2: Прогноз "туда и обратно" до рассвета/заката ---
             const targetTime = this.state.etaTarget === 'sunrise' ? this.state.sunriseTime : this.state.sunsetTime;
             const targetLabel = this.state.etaTarget === 'sunrise' ? 'сходу' : 'заходу';
             let etaHtml = '';
-            
+            let suggestedSpeedHtml = ''; // Для рекомендуемой скорости
+
             if (!targetTime) {
                 etaHtml = `🌅 Час ${targetLabel} невідомий`;
             } else {
                 const roundTripDistance = oneWayDistance * 2;
+                const timeRemainingSeconds = (targetTime.getTime() - Date.now()) / 1000;
+
                 if (speed < 0.5) {
                     etaHtml = `туди й назад: ${(roundTripDistance / 1000).toFixed(2)} км`;
                 } else {
@@ -427,19 +410,29 @@
                         const minutes = Math.floor((totalSeconds % 3600) / 60).toString().padStart(2, '0');
                         return `${hours}:${minutes}`;
                     };
-                    if (timeDiff > 0) { etaHtml = `✅ Повернетесь до ${targetLabel} (запас: ${formatDiff(timeDiff)})`;
-                    } else { etaHtml = `❌ Запізнення з поверненням: ${formatDiff(timeDiff)}`; }
+                    
+                    if (timeDiff > 0) {
+                        etaHtml = `✅ Встигнете до ${targetLabel} (запас: ${formatDiff(timeDiff)})`;
+                    } else {
+                        etaHtml = `❌ Запізнення до ${targetLabel}: ${formatDiff(timeDiff)}`;
+                        // Расчет рекомендуемой скорости, если опаздываем и еще есть время
+                        if (timeRemainingSeconds > 0) {
+                            const requiredSpeedMs = roundTripDistance / timeRemainingSeconds;
+                            const requiredSpeedKmh = (requiredSpeedMs * 3.6).toFixed(1);
+                            suggestedSpeedHtml = `<span class="separator"></span> <span title="Потрібна середня швидкість">🏃 ${requiredSpeedKmh} км/год</span>`;
+                        }
+                    }
                 }
             }
             
             const toggleIcon = this.state.etaTarget === 'sunrise' ? '🌇' : '🌅';
             
             this.elements.navInfoPanel.innerHTML = `
-                <span>${weatherHtml}</span>
+                <div class="eta-info">${weatherHtml}</div>
                 <div class="separator"></div>
-                <span>🚀 ${speedKmh} км/год</span>
+                <div class="eta-info">🚀 ${speedKmh} км/год</div>
                 <div class="separator"></div>
-                <span>${etaHtml}</span>
+                <div class="eta-info">${etaHtml}${suggestedSpeedHtml}</div>
                 <button id="eta-toggle-btn" title="Переключити на захід/схід сонця">${toggleIcon}</button>
             `;
             
